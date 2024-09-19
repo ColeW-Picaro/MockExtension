@@ -5,6 +5,8 @@ namespace MockExtension;
 
 public class MockExtensionBuilder
 {
+    private static Type voidType = typeof(void);
+    
     public IEnumerable<string> BuildMockExtensions<T>()
         where T : class
     {
@@ -40,18 +42,39 @@ public class MockExtensionBuilder
             returnType = taskType;
         }
 
-        var parameters = method.GetParameters();
-        var parameterList = string.Join(", ", parameters.Select(CreateParameter)
-            .Append(new Parameter(isAsync ? taskType! : returnType, "returnType"))
-            .Append(new Parameter(typeof(Moq.Times), "times")));
-        var methodText =
-$@"public static void With{method.Name}(this Mock<{type.Name}> mock, {parameterList})
+        var parameters = method.GetParameters().Select(CreateParameter).ToList();
+        if (returnType.Name is not "Void") {
+            
+            parameters.Add(new Parameter(isAsync ? taskType! : returnType, "returnValue"));
+        }
+        parameters.Add(new Parameter(typeof(Moq.Times), "times"));
+        var parameterList = string.Join(", ", parameters);
+        
+        return returnType switch {
+            { Name: "Void" } => BuildMethodWithVoidReturn(method, type, isAsync, parameterList),
+            { Name: "Task" } => BuildMethodWithReturn(method, type, isAsync, parameterList),
+            { } => BuildMethodWithReturn(method, type, isAsync, parameterList),
+            null => throw new Exception("Retyirn type is null")
+        };        
+    }
+
+    private static string BuildMethodWithReturn(MethodInfo method, Type type, bool isAsync, string parameterList)
+    {
+        return $@"public static void With{method.Name}(this Mock<{type.Name}> mock, {parameterList})
 {{
     mock.Setup(x => x.{method.Name}())
         .Returns{(isAsync ? "Async" : "")}(returnValue)
         .Verifiable(times)
 }}";
-        return methodText;
+    }
+
+    private static string BuildMethodWithVoidReturn(MethodInfo method, Type type, bool isAsync, string parameterList)
+    {
+        return $@"public static void With{method.Name}(this Mock<{type.Name}> mock, {parameterList})
+{{
+    mock.Setup(x => x.{method.Name}())
+        .Verifiable(times)
+}}";
     }
 
     private Parameter CreateParameter(ParameterInfo parameterInfo)
